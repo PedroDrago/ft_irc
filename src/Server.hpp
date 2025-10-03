@@ -31,9 +31,10 @@ public:
 	// std::map<std::string, User> users; // map<nickname, User>
 	std::vector<pollfd> poll_fds;
 	struct pollfd server_pollfd;
+	std::map<int, User*> users;
 	int sock;
 	void init();
-	bool accept_connection();
+	int accept_connection();
 	void run();
 
 };
