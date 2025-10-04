@@ -1,5 +1,6 @@
 #include "Server.hpp"
 #include "Logger.hpp"
+#include "User.hpp"
 #include "utils.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -138,15 +139,12 @@ void authenticate_user(char *buffer, User *user, Server &server){
 			std::string msg = "NICK message in the wrong format. excpected \"NICK <NICKNAME>\"";
 		}
 		std::map<int, User*>::iterator it;
-		Logger::info("len: " + numToString(server.users.size()));
 		for (it = server.users.begin(); it != server.users.end(); ++it) {
 			if(it->second->nickname == splited_buffer[1]){
-				Logger::info("aqui: " + numToString(user->fd));
 				std::string msg = "Nickname " + splited_buffer[1] + " already taken. Please choose a unique Nickname";
 				send(user->fd, msg.c_str(), msg.size(), 0);
 				return;
 			}
-			Logger::info("aca");
 		}
 		user->nickname = splited_buffer[1];
 		user->stt = USER;
@@ -158,11 +156,40 @@ void authenticate_user(char *buffer, User *user, Server &server){
 			send(user->fd, msg.c_str(), msg.size(), 0);
 			return;
 		}
+		std::string msg = "User registered.";
+		send(user->fd, msg.c_str(), msg.size(), 0);
 		user->stt = AUTH;
 		return;
 	}
 }
-void proccess_message(char *buffer, User *user){
+// TODO: 
+// - transformar funcoes soltas em metodos.
+// - sempre que fechar uma sessão deletar o usuário daquele FD
+// - criar segundo map de users mas que a chave é string - o nick.
+//		- quando for precisar buscar os dados de um usuário pelo nick vai no map de nick
+//      - quando for precisar buscar os dados do usuario pelo fdc vai no map de int
+//      - importante o User ser alocado na heap e ambos os maps apenas apontarem pras mesmas memórias.
+//      - importante sempre que deletar, deletar de todos os maps
+void proccess_message(char *buffer, User *user, Server *server){
+	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
+	if (splited_buffer[0] == "PRIVMSG"){
+		// FIX: add validations.
+		std::string &target_nick = splited_buffer[1];
+		std::map<int, User*>::iterator it;
+		Logger::info("len: " + numToString(server->users.size())); 
+		int target_fd = -1;
+		for (it = server->users.begin(); it != server->users.end(); ++it) {
+			if(it->second->nickname == target_nick){
+				target_fd = it->second->fd;
+				break;
+			}
+		}
+		std::string target_msg = user->nickname + "!" + user->username + " PRIVMSG " + target_nick + ":";
+		for (std::size_t i = 2; i < splited_buffer.size(); i++) {
+			target_msg += splited_buffer[i];
+		}
+		send(target_fd, target_msg.c_str(), target_msg.size(), 0);
+	}
 }
 
 void Server::run(){
@@ -219,7 +246,7 @@ void Server::run(){
 						Logger::info("user: " + numToString(&current_user));
 								
 						if (current_user->stt == AUTH){
-							proccess_message(buffer, current_user);
+							proccess_message(buffer, current_user, this);
 						} else {
 							authenticate_user(buffer, current_user, *this);
 							Logger::info("state after: " + numToString(current_user->stt));
