@@ -121,7 +121,7 @@ void authenticate_user(char *buffer, User *user, Server &server){
 	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
 	if (user->stt == PASS){
 		if (splited_buffer.size() != 2 || splited_buffer[0] != "PASS"){
-			std::string msg = "PASS message in the wrong format. excpected \"PASS <PASSWORD>\"";
+			std::string msg = "PASS message in the wrong format. excpected \"PASS <PASSWORD>\"\n";
 			send(user->fd, msg.c_str(), msg.size(), 0);
 			return;
 		}
@@ -136,12 +136,12 @@ void authenticate_user(char *buffer, User *user, Server &server){
 	}
 	if (user->stt == NICK){
 		if (splited_buffer.size() != 1 || splited_buffer[0] != "NICK"){
-			std::string msg = "NICK message in the wrong format. excpected \"NICK <NICKNAME>\"";
+			std::string msg = "NICK message in the wrong format. excpected \"NICK <NICKNAME>\"\n";
 		}
 		std::map<int, User*>::iterator it;
-		for (it = server.users.begin(); it != server.users.end(); ++it) {
+		for (it = server.users_fd.begin(); it != server.users_fd.end(); ++it) {
 			if(it->second->nickname == splited_buffer[1]){
-				std::string msg = "Nickname " + splited_buffer[1] + " already taken. Please choose a unique Nickname";
+				std::string msg = "Nickname " + splited_buffer[1] + " already taken. Please choose a unique Nickname\n";
 				send(user->fd, msg.c_str(), msg.size(), 0);
 				return;
 			}
@@ -152,13 +152,14 @@ void authenticate_user(char *buffer, User *user, Server &server){
 	}
 	if (user->stt == USER){
 		if (splited_buffer.size() != 2 || splited_buffer[0] != "USER"){
-			std::string msg = "USER message in the wrong format. excpected \"USER <USERNAME>\"";
+			std::string msg = "USER message in the wrong format. excpected \"USER <USERNAME>\"\n";
 			send(user->fd, msg.c_str(), msg.size(), 0);
 			return;
 		}
-		std::string msg = "User registered.";
+		std::string msg = "User registered.\n";
 		send(user->fd, msg.c_str(), msg.size(), 0);
 		user->stt = AUTH;
+		server.users_nick[user->nickname] = user;
 		return;
 	}
 }
@@ -170,15 +171,15 @@ void authenticate_user(char *buffer, User *user, Server &server){
 //      - quando for precisar buscar os dados do usuario pelo fdc vai no map de int
 //      - importante o User ser alocado na heap e ambos os maps apenas apontarem pras mesmas memórias.
 //      - importante sempre que deletar, deletar de todos os maps
-void proccess_message(char *buffer, User *user, Server *server){
+void Server::proccess_message(char *buffer, User *user){
 	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
 	if (splited_buffer[0] == "PRIVMSG"){
 		// FIX: add validations.
 		std::string &target_nick = splited_buffer[1];
 		std::map<int, User*>::iterator it;
-		Logger::info("len: " + numToString(server->users.size())); 
+		Logger::info("len: " + numToString(this->users_fd.size())); 
 		int target_fd = -1;
-		for (it = server->users.begin(); it != server->users.end(); ++it) {
+		for (it = this->users_fd.begin(); it != this->users_fd.end(); ++it) {
 			if(it->second->nickname == target_nick){
 				target_fd = it->second->fd;
 				break;
@@ -188,6 +189,7 @@ void proccess_message(char *buffer, User *user, Server *server){
 		for (std::size_t i = 2; i < splited_buffer.size(); i++) {
 			target_msg += splited_buffer[i];
 		}
+		target_msg += "\n";
 		send(target_fd, target_msg.c_str(), target_msg.size(), 0);
 	}
 }
@@ -213,8 +215,8 @@ void Server::run(){
 					User *new_user = new User;
 					new_user->fd = client_pollfd;
 					Logger::info("new_user.fd: " + numToString(new_user->fd));
-					this->users.insert(std::make_pair(client_pollfd, new_user));
-					Logger::info("retrieved in map: " + numToString(this->users.at(client_pollfd)->fd));
+					this->users_fd.insert(std::make_pair(client_pollfd, new_user));
+					Logger::info("retrieved in map: " + numToString(this->users_fd.at(client_pollfd)->fd));
 					// Logger::warning("fd " + numToString(client_pollfd) + " number: " + numToString(a.random_n));
 				} else {
 					std::memset(buffer, 0, BUFFER_SIZE);
@@ -235,18 +237,26 @@ void Server::run(){
 						// --i;
 					} else if (bytes_recv == 0){
 						Logger::warning("client disconnected: fd " + numToString(current_pollfd.fd));
+						if (this->users_fd.find(current_pollfd.fd) != this->users_fd.end()){
+							User *current_user = this->users_fd.at(current_pollfd.fd);
+							std::string current_nickname = current_user->nickname;
+							delete current_user;
+							current_user = NULL;
+							this->users_fd.erase(current_pollfd.fd);
+							this->users_nick.erase(current_nickname);
+						}
 						close(current_pollfd.fd);
 						this->poll_fds.erase(this->poll_fds.begin() + i);
 						--i;
 					} else {
 						buffer[bytes_recv] = '\0';
 						
-						User *current_user = this->users.at(current_pollfd.fd);
+						User *current_user = this->users_fd.at(current_pollfd.fd);
 						Logger::info("current_pollfd: " + numToString(current_pollfd.fd));
 						Logger::info("user: " + numToString(&current_user));
 								
 						if (current_user->stt == AUTH){
-							proccess_message(buffer, current_user, this);
+							this->proccess_message(buffer, current_user);
 						} else {
 							authenticate_user(buffer, current_user, *this);
 							Logger::info("state after: " + numToString(current_user->stt));

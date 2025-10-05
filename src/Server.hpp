@@ -31,10 +31,12 @@ public:
 	// std::map<std::string, User> users; // map<nickname, User>
 	std::vector<pollfd> poll_fds;
 	struct pollfd server_pollfd;
-	std::map<int, User*> users;
+	std::map<int, User*> users_fd;
+	std::map<std::string, User*> users_nick;
 	int sock;
 	void init();
 	int accept_connection();
+	void proccess_message(char *buffer, User *user);
 	void run();
 
 };
