@@ -4,6 +4,7 @@
 #include "utils.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <locale>
 #include <netinet/in.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
@@ -36,6 +37,9 @@
 // - broadcast de mensagens em channels
 // - classes de operators
 // - comandos de operators
+// - subject menciona que temos que lidar com mensgens tipo "com^Dman^Dd".
+//        - "In order to process a command, you have to first aggregate the received packets in order to rebuild it."
+//        - não entendi qual o problema de uma mensagem assim, mas blz
 
 Server::Server(std::string port, std::string password): password(password), port_str(port){
 	this->port = std::atoi(port.c_str());
@@ -176,25 +180,36 @@ User* Server::get_user_by_nickname(std::string &nickname){
 void Server::proccess_message(char *buffer, User *user){
 	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
 	if (splited_buffer[0] == "PRIVMSG"){
+		Logger::warning("priv detected");
 		// FIX: add validations.
 		std::string &target_nick = splited_buffer[1];
 		std::map<int, User*>::iterator it;
 		int target_fd = -1;
 		for (it = this->fd_users.begin(); it != this->fd_users.end(); ++it) {
-			if(it->second->nickname == target_nick){
+			if(it->second->nickname == target_nick && it->second->stt == AUTH){
+				Logger::warning("User found");
 				target_fd = it->second->fd;
-				break;
+				// FIX: essa logica de mensagem tira todos os espacos. Preciso entender se a parada de `:` é o jeito
+				// certo de delimitar as mensagem sempre ou se preciso fazer um parsing mais minucioso.
+				std::string target_msg = user->nickname + "!" + user->username + " PRIVMSG " + target_nick + ":";
+				for (std::size_t i = 2; i < splited_buffer.size(); i++) { 
+					target_msg += splited_buffer[i];
+				}
+				target_msg += "\n";
+				send(target_fd, target_msg.c_str(), target_msg.size(), 0);
+				return;
 			}
+			Logger::warning("User NOT found");
+			std::string error_msg = "401 " + user->nickname + " " + target_nick + " :No such nick/channel\n";
+			Logger::warning("send");
+			send(user->fd, error_msg.c_str(), error_msg.size(), 0);
+			Logger::warning("after");
+			return;
 		}
-		std::string target_msg = user->nickname + "!" + user->username + " PRIVMSG " + target_nick + ":";
-		// FIX: essa logica de mensagem tira todos os espacos. Preciso entender se a parada de `:` é o jeito
-		// certo de delimitar as mensagem sempre ou se preciso fazer um parsing mais minucioso.
-		for (std::size_t i = 2; i < splited_buffer.size(); i++) { 
-			target_msg += splited_buffer[i];
-		}
-		target_msg += "\n";
-		send(target_fd, target_msg.c_str(), target_msg.size(), 0);
 	}
+	std::string msg = "Command not supported | internal server error: " + std::string(buffer) + "\n";
+	send(user->fd, msg.c_str(), msg.size(), 0);
+	return;
 }
 
 void Server::run(){
@@ -212,6 +227,7 @@ void Server::run(){
 				if (current_pollfd.fd == this->sock){
 					int client_pollfd= this->accept_connection();
 					if (client_pollfd < 0){
+						Logger::warning("continued on accept_connection");
 						continue;
 					}
 					User *new_user = new User;
@@ -221,6 +237,7 @@ void Server::run(){
 					std::memset(buffer, 0, BUFFER_SIZE);
 					int bytes_recv = recv(current_pollfd.fd, buffer, BUFFER_SIZE - 1, 0);
 					if (bytes_recv < 0){
+						Logger::warning("continued on recv");
 						continue;
 						// FIX: acho que isso ta errado, mas pelo que entendi do subject a gnt n
 						// pode usar o errno, n ta nem na lista de coisas permitidas (na webserv tava só
@@ -242,10 +259,10 @@ void Server::run(){
 						this->poll_fds.erase(this->poll_fds.begin() + i);
 						--i;
 					} else {
+						Logger::warning("Got in else");
 						buffer[bytes_recv] = '\0';
-						
 						User *current_user = this->fd_users.at(current_pollfd.fd);
-								
+						Logger::warning("user state: " + numToString(current_user->stt));
 						if (current_user->stt == AUTH){
 							this->proccess_message(buffer, current_user);
 						} else {
