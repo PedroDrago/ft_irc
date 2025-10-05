@@ -41,7 +41,6 @@
 #include <fcntl.h>
 #include <utility>
 #include <vector>
-#define MAX_CONNECTIONS 2048 // FIX: Adjust
 
 Server::Server(std::string port, std::string password): password(password), port_str(port){
 	this->port = std::atoi(port.c_str());
@@ -112,12 +111,11 @@ int Server::accept_connection(){
 	client_pollfd.fd = client_socket;
 	client_pollfd.events = POLLIN;
 	this->poll_fds.push_back(client_pollfd);
-	Logger::info("new connection: fd " + numToString(client_socket));
+	Logger::info("new connection accepted");
 	return client_pollfd.fd;;
 }
 
-void authenticate_user(char *buffer, User *user, Server &server){
-	Logger::info("starting to authenticate user in state: " + numToString(user->stt) + "with fd: " + numToString(user->fd));
+void Server::authenticate_user(char *buffer, User *user){
 	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
 	if (user->stt == PASS){
 		if (splited_buffer.size() != 2 || splited_buffer[0] != "PASS"){
@@ -125,9 +123,8 @@ void authenticate_user(char *buffer, User *user, Server &server){
 			send(user->fd, msg.c_str(), msg.size(), 0);
 			return;
 		}
-		if (splited_buffer[1] != server.password){
+		if (splited_buffer[1] != this->password){
 			std::string msg = "Wrong password\n";
-			Logger::info("fd: " + numToString(user->fd));
 			send(user->fd, msg.c_str(), msg.size(), 0);
 			return;
 		}
@@ -139,7 +136,7 @@ void authenticate_user(char *buffer, User *user, Server &server){
 			std::string msg = "NICK message in the wrong format. excpected \"NICK <NICKNAME>\"\n";
 		}
 		std::map<int, User*>::iterator it;
-		for (it = server.users_fd.begin(); it != server.users_fd.end(); ++it) {
+		for (it = this->users_fd.begin(); it != this->users_fd.end(); ++it) {
 			if(it->second->nickname == splited_buffer[1]){
 				std::string msg = "Nickname " + splited_buffer[1] + " already taken. Please choose a unique Nickname\n";
 				send(user->fd, msg.c_str(), msg.size(), 0);
@@ -159,25 +156,41 @@ void authenticate_user(char *buffer, User *user, Server &server){
 		std::string msg = "User registered.\n";
 		send(user->fd, msg.c_str(), msg.size(), 0);
 		user->stt = AUTH;
-		server.users_nick[user->nickname] = user;
+		this->users_nick[user->nickname] = user;
 		return;
 	}
 }
 // TODO: 
-// - transformar funcoes soltas em metodos.
 // - sempre que fechar uma sessão deletar o usuário daquele FD
 // - criar segundo map de users mas que a chave é string - o nick.
 //		- quando for precisar buscar os dados de um usuário pelo nick vai no map de nick
 //      - quando for precisar buscar os dados do usuario pelo fdc vai no map de int
 //      - importante o User ser alocado na heap e ambos os maps apenas apontarem pras mesmas memórias.
 //      - importante sempre que deletar, deletar de todos os maps
+
+User* Server::get_user_by_fd(int fd){
+	try {
+		User *usr = this->users_fd.at(fd);
+		return usr;
+	} catch (std::out_of_range &e) {
+		return NULL;
+	}
+}
+User* Server::get_user_by_nickname(std::string &nickname){
+	try {
+		User *usr = this->users_nick.at(nickname);
+		return usr;
+	} catch (std::out_of_range &e) {
+		return NULL;
+	}
+}
+
 void Server::proccess_message(char *buffer, User *user){
 	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
 	if (splited_buffer[0] == "PRIVMSG"){
 		// FIX: add validations.
 		std::string &target_nick = splited_buffer[1];
 		std::map<int, User*>::iterator it;
-		Logger::info("len: " + numToString(this->users_fd.size())); 
 		int target_fd = -1;
 		for (it = this->users_fd.begin(); it != this->users_fd.end(); ++it) {
 			if(it->second->nickname == target_nick){
@@ -186,7 +199,9 @@ void Server::proccess_message(char *buffer, User *user){
 			}
 		}
 		std::string target_msg = user->nickname + "!" + user->username + " PRIVMSG " + target_nick + ":";
-		for (std::size_t i = 2; i < splited_buffer.size(); i++) {
+		// FIX: essa logica de mensagem tira todos os espacos. Preciso entender se a parada de `:` é o jeito
+		// certo de delimitar as mensagem sempre ou se preciso fazer um parsing mais minucioso.
+		for (std::size_t i = 2; i < splited_buffer.size(); i++) { 
 			target_msg += splited_buffer[i];
 		}
 		target_msg += "\n";
@@ -198,7 +213,7 @@ void Server::run(){
 	char buffer[BUFFER_SIZE];
 
 	while (true){
-		int poll_count = poll(&this->poll_fds[0], this->poll_fds.size(), -1); // FIX: add timeout?
+		int poll_count = poll(&this->poll_fds[0], this->poll_fds.size(), -1); // FIX: adicionar timeout?
 		if (poll_count < 0) {
 			Logger::error("poll() failed");
 			break;
@@ -208,42 +223,32 @@ void Server::run(){
 			if (current_pollfd.revents & POLLIN) {
 				if (current_pollfd.fd == this->sock){
 					int client_pollfd= this->accept_connection();
-					Logger::info("returned fd: " + numToString(client_pollfd));
 					if (client_pollfd < 0){
 						continue;
 					}
 					User *new_user = new User;
 					new_user->fd = client_pollfd;
-					Logger::info("new_user.fd: " + numToString(new_user->fd));
 					this->users_fd.insert(std::make_pair(client_pollfd, new_user));
-					Logger::info("retrieved in map: " + numToString(this->users_fd.at(client_pollfd)->fd));
-					// Logger::warning("fd " + numToString(client_pollfd) + " number: " + numToString(a.random_n));
 				} else {
 					std::memset(buffer, 0, BUFFER_SIZE);
 					int bytes_recv = recv(current_pollfd.fd, buffer, BUFFER_SIZE - 1, 0);
 					if (bytes_recv < 0){
 						continue;
-						// if (errno == EAGAIN){
-						// 	Logger::warning("EAGAIN");
-						// 	continue;
-						// }
-						// if (errno == EWOULDBLOCK){
-						// 	Logger::warning("EWOULDBLOCK");
-						// 	continue;
-						// }
-						// Logger::error("recv() failed: " + std::string(strerror(errno)));
-						// close(current_pollfd.fd);
-						// this->poll_fds.erase(this->poll_fds.begin() + i);
-						// --i;
+						// FIX: acho que isso ta errado, mas pelo que entendi do subject a gnt n
+						// pode usar o errno, n ta nem na lista de coisas permitidas (na webserv tava só
+						// que tinha uma regra de quando não pode usar). Mas se puder o ideal aqui é checar
+						// por EAGAIN ou EWOULDBLOCK
 					} else if (bytes_recv == 0){
 						Logger::warning("client disconnected: fd " + numToString(current_pollfd.fd));
 						if (this->users_fd.find(current_pollfd.fd) != this->users_fd.end()){
-							User *current_user = this->users_fd.at(current_pollfd.fd);
-							std::string current_nickname = current_user->nickname;
-							delete current_user;
-							current_user = NULL;
-							this->users_fd.erase(current_pollfd.fd);
-							this->users_nick.erase(current_nickname);
+							User *current_user = get_user_by_fd(current_pollfd.fd);
+							if (current_user){
+								std::string current_nickname = current_user->nickname;
+								delete current_user;
+								current_user = NULL;
+								this->users_fd.erase(current_pollfd.fd);
+								this->users_nick.erase(current_nickname);
+							}
 						}
 						close(current_pollfd.fd);
 						this->poll_fds.erase(this->poll_fds.begin() + i);
@@ -252,20 +257,12 @@ void Server::run(){
 						buffer[bytes_recv] = '\0';
 						
 						User *current_user = this->users_fd.at(current_pollfd.fd);
-						Logger::info("current_pollfd: " + numToString(current_pollfd.fd));
-						Logger::info("user: " + numToString(&current_user));
 								
 						if (current_user->stt == AUTH){
 							this->proccess_message(buffer, current_user);
 						} else {
-							authenticate_user(buffer, current_user, *this);
-							Logger::info("state after: " + numToString(current_user->stt));
+							authenticate_user(buffer, current_user);
 						}
-
-						// Logger::warning(current_user.random_n);
-						// Logger::info("received from fd " + numToString(current_pollfd.fd) + " : " + buffer);
-						//
-						// send(current_pollfd.fd, buffer, bytes_recv, 0);
 					}
 				}
 			}

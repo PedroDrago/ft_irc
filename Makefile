@@ -1,9 +1,11 @@
-NAME = irc 
+NAME = ircserv
 SRC = $(shell find src -name "*.cpp")
 OBJ = $(SRC:.cpp=.o)
 
 CC = c++
 DEV_FLAGS = -Wall -Wextra -std=c++98 -g
+PORT = 8080
+PASS = pass
 FLAGS = $(DEV_FLAGS) -Werror -g
 LINKS =
 
@@ -22,5 +24,8 @@ clean:
 
 fclean: clean
 	rm -f $(NAME)
+
+exec: $(ALL)
+	./$(NAME) $(PORT) $(PASS)
 
 re: fclean all

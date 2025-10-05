@@ -25,10 +25,8 @@ public:
 	Server &operator = (Server &src);
 	~Server();
 	std::string password;
-
 	int port;
 	std::string port_str;
-	// std::map<std::string, User> users; // map<nickname, User>
 	std::vector<pollfd> poll_fds;
 	struct pollfd server_pollfd;
 	std::map<int, User*> users_fd;
@@ -36,8 +34,11 @@ public:
 	int sock;
 	void init();
 	int accept_connection();
+	void authenticate_user(char *buffer, User *user);
 	void proccess_message(char *buffer, User *user);
 	void run();
+	User *get_user_by_nickname(std::string &nickname);
+	User *get_user_by_fd(int fd);
 
 };
 #endif

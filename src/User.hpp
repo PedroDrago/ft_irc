@@ -24,5 +24,6 @@ public:
 	std::string channel;
 	int random_n;
 	state stt;
+	void send_privmsg(std::string target_nickname, std::string message);
 };
 #endif
