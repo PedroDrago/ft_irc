@@ -1,0 +1,7 @@
+*.o
+ircserv
+*.a
+*.log
+.vscode
+a.out
+src/a.out
