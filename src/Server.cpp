@@ -7,8 +7,6 @@
 #include <netinet/in.h>
 #include <sys/poll.h>
 #include <sys/socket.h>
-#include <iostream>
-#include <fstream>
 #include <string>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -18,21 +16,11 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <ostream>
 #include <sys/types.h>
-#include <algorithm>
 #include <cstddef>
-#include <iostream>
-#include <fstream>
-#include <sstream>
 #include <string>
-
-#include <cstdlib> // For rand() and srand()
-#include <ctime>   // For time()
-#include <iostream>
-
-#include <fstream>
-#include <iostream>
+#include <cstdlib> 
+#include <ctime>   
 #include <string>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -41,6 +29,13 @@
 #include <fcntl.h>
 #include <utility>
 #include <vector>
+// TODO: 
+// - resolver os FIX que anotei
+// - classes de channels
+// - comandos de channels
+// - broadcast de mensagens em channels
+// - classes de operators
+// - comandos de operators
 
 Server::Server(std::string port, std::string password): password(password), port_str(port){
 	this->port = std::atoi(port.c_str());
@@ -136,7 +131,7 @@ void Server::authenticate_user(char *buffer, User *user){
 			std::string msg = "NICK message in the wrong format. excpected \"NICK <NICKNAME>\"\n";
 		}
 		std::map<int, User*>::iterator it;
-		for (it = this->users_fd.begin(); it != this->users_fd.end(); ++it) {
+		for (it = this->fd_users.begin(); it != this->fd_users.end(); ++it) {
 			if(it->second->nickname == splited_buffer[1]){
 				std::string msg = "Nickname " + splited_buffer[1] + " already taken. Please choose a unique Nickname\n";
 				send(user->fd, msg.c_str(), msg.size(), 0);
@@ -156,21 +151,14 @@ void Server::authenticate_user(char *buffer, User *user){
 		std::string msg = "User registered.\n";
 		send(user->fd, msg.c_str(), msg.size(), 0);
 		user->stt = AUTH;
-		this->users_nick[user->nickname] = user;
+		this->nick_users[user->nickname] = user;
 		return;
 	}
 }
-// TODO: 
-// - sempre que fechar uma sessão deletar o usuário daquele FD
-// - criar segundo map de users mas que a chave é string - o nick.
-//		- quando for precisar buscar os dados de um usuário pelo nick vai no map de nick
-//      - quando for precisar buscar os dados do usuario pelo fdc vai no map de int
-//      - importante o User ser alocado na heap e ambos os maps apenas apontarem pras mesmas memórias.
-//      - importante sempre que deletar, deletar de todos os maps
 
 User* Server::get_user_by_fd(int fd){
 	try {
-		User *usr = this->users_fd.at(fd);
+		User *usr = this->fd_users.at(fd);
 		return usr;
 	} catch (std::out_of_range &e) {
 		return NULL;
@@ -178,7 +166,7 @@ User* Server::get_user_by_fd(int fd){
 }
 User* Server::get_user_by_nickname(std::string &nickname){
 	try {
-		User *usr = this->users_nick.at(nickname);
+		User *usr = this->nick_users.at(nickname);
 		return usr;
 	} catch (std::out_of_range &e) {
 		return NULL;
@@ -192,7 +180,7 @@ void Server::proccess_message(char *buffer, User *user){
 		std::string &target_nick = splited_buffer[1];
 		std::map<int, User*>::iterator it;
 		int target_fd = -1;
-		for (it = this->users_fd.begin(); it != this->users_fd.end(); ++it) {
+		for (it = this->fd_users.begin(); it != this->fd_users.end(); ++it) {
 			if(it->second->nickname == target_nick){
 				target_fd = it->second->fd;
 				break;
@@ -228,7 +216,7 @@ void Server::run(){
 					}
 					User *new_user = new User;
 					new_user->fd = client_pollfd;
-					this->users_fd.insert(std::make_pair(client_pollfd, new_user));
+					this->fd_users.insert(std::make_pair(client_pollfd, new_user));
 				} else {
 					std::memset(buffer, 0, BUFFER_SIZE);
 					int bytes_recv = recv(current_pollfd.fd, buffer, BUFFER_SIZE - 1, 0);
@@ -240,14 +228,14 @@ void Server::run(){
 						// por EAGAIN ou EWOULDBLOCK
 					} else if (bytes_recv == 0){
 						Logger::warning("client disconnected: fd " + numToString(current_pollfd.fd));
-						if (this->users_fd.find(current_pollfd.fd) != this->users_fd.end()){
+						if (this->fd_users.find(current_pollfd.fd) != this->fd_users.end()){
 							User *current_user = get_user_by_fd(current_pollfd.fd);
 							if (current_user){
 								std::string current_nickname = current_user->nickname;
 								delete current_user;
 								current_user = NULL;
-								this->users_fd.erase(current_pollfd.fd);
-								this->users_nick.erase(current_nickname);
+								this->fd_users.erase(current_pollfd.fd);
+								this->nick_users.erase(current_nickname);
 							}
 						}
 						close(current_pollfd.fd);
@@ -256,7 +244,7 @@ void Server::run(){
 					} else {
 						buffer[bytes_recv] = '\0';
 						
-						User *current_user = this->users_fd.at(current_pollfd.fd);
+						User *current_user = this->fd_users.at(current_pollfd.fd);
 								
 						if (current_user->stt == AUTH){
 							this->proccess_message(buffer, current_user);

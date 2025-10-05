@@ -4,7 +4,6 @@
 #include <netinet/in.h>
 #include <string>
 #include "User.hpp"
-#include <iostream>
 #include <vector>
 #include <string>
 #include <cstring>
@@ -29,8 +28,8 @@ public:
 	std::string port_str;
 	std::vector<pollfd> poll_fds;
 	struct pollfd server_pollfd;
-	std::map<int, User*> users_fd;
-	std::map<std::string, User*> users_nick;
+	std::map<int, User*> fd_users; // NOTE: map para achar usuários pelo socket fd deles
+	std::map<std::string, User*> nick_users; // NOTE: map para achar usuários pelo nick deles
 	int sock;
 	void init();
 	int accept_connection();

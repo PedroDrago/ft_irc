@@ -32,5 +32,3 @@ User::~User(){
 	Logger::warning("user destructor");
 };
 
-void User::send_privmsg(std::string target_nickname, std::string message){
-}
