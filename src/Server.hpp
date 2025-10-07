@@ -38,6 +38,7 @@ public:
 	void run();
 	User *get_user_by_nickname(std::string &nickname);
 	User *get_user_by_fd(int fd);
+	void send_message(int target_fd, std::string message);
 
 };
 #endif

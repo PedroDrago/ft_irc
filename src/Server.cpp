@@ -1,5 +1,6 @@
 #include "Server.hpp"
 #include "Logger.hpp"
+#include "Message.hpp"
 #include "User.hpp"
 #include "utils.hpp"
 #include <cstdio>
@@ -32,6 +33,7 @@
 #include <vector>
 // TODO: 
 // - resolver os FIX que anotei
+// - colocar todas as classes em forma ortodoxa canonica
 // - classes de channels
 // - comandos de channels
 // - broadcast de mensagens em channels
@@ -115,49 +117,40 @@ int Server::accept_connection(){
 }
 
 void Server::authenticate_user(char *buffer, User *user){
+	// TODO: refact to use Message class
 	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
-	if (user->stt == PASS){
-		if (splited_buffer.size() != 2 || splited_buffer[0] != "PASS"){
-			std::string msg = "PASS message in the wrong format. excpected \"PASS <PASSWORD>\"\n";
-			send(user->fd, msg.c_str(), msg.size(), 0);
-			return;
-		}
+	if (splited_buffer[0] == "PASS"){
 		if (splited_buffer[1] != this->password){
-			std::string msg = "Wrong password\n";
-			send(user->fd, msg.c_str(), msg.size(), 0);
+			std::string msg = "Invalid password";
+			this->send_message(user->fd, msg);
 			return;
 		}
-		user->stt = NICK;
+		user->is_authenticated = true;
 		return;
 	}
-	if (user->stt == NICK){
-		if (splited_buffer.size() != 1 || splited_buffer[0] != "NICK"){
-			std::string msg = "NICK message in the wrong format. excpected \"NICK <NICKNAME>\"\n";
-		}
+	if (splited_buffer[0] == "NICK"){
+		//TODO: validate nickname characters
 		std::map<int, User*>::iterator it;
 		for (it = this->fd_users.begin(); it != this->fd_users.end(); ++it) {
 			if(it->second->nickname == splited_buffer[1]){
-				std::string msg = "Nickname " + splited_buffer[1] + " already taken. Please choose a unique Nickname\n";
-				send(user->fd, msg.c_str(), msg.size(), 0);
+				std::string msg = "Nickname " + splited_buffer[1] + " is already in use";
+				this->send_message(user->fd, msg);
 				return;
 			}
 		}
 		user->nickname = splited_buffer[1];
-		user->stt = USER;
 		return;
 	}
-	if (user->stt == USER){
-		if (splited_buffer.size() != 2 || splited_buffer[0] != "USER"){
-			std::string msg = "USER message in the wrong format. excpected \"USER <USERNAME>\"\n";
-			send(user->fd, msg.c_str(), msg.size(), 0);
-			return;
-		}
-		std::string msg = "User registered.\n";
-		send(user->fd, msg.c_str(), msg.size(), 0);
-		user->stt = AUTH;
+	if (splited_buffer[0] == "USER"){
+		// TODO: validate user characters and existence
+		std::string msg = "User registered.";
+		this->send_message(user->fd, msg);
 		this->nick_users[user->nickname] = user;
+		user->prefix = user->nickname + "!" + user->username + "@" + "<hostname>";
+		user->is_registered = true;
 		return;
 	}
+	this->send_message(user->fd, "You have not registered");
 }
 
 User* Server::get_user_by_fd(int fd){
@@ -168,6 +161,7 @@ User* Server::get_user_by_fd(int fd){
 		return NULL;
 	}
 }
+
 User* Server::get_user_by_nickname(std::string &nickname){
 	try {
 		User *usr = this->nick_users.at(nickname);
@@ -177,39 +171,26 @@ User* Server::get_user_by_nickname(std::string &nickname){
 	}
 }
 
+void Server::send_message(int target_fd, std::string message){
+	// TODO: substituir pelo addr do server
+	message = "<SERVER_HOST> " + message + "\r\n";
+	send(target_fd, message.c_str(), message.size(), 0);
+}
+
 void Server::proccess_message(char *buffer, User *user){
-	std::vector<std::string> splited_buffer = split_by_whitespace(buffer);
-	if (splited_buffer[0] == "PRIVMSG"){
-		Logger::warning("priv detected");
-		// FIX: add validations.
-		std::string &target_nick = splited_buffer[1];
-		std::map<int, User*>::iterator it;
-		int target_fd = -1;
-		for (it = this->fd_users.begin(); it != this->fd_users.end(); ++it) {
-			if(it->second->nickname == target_nick && it->second->stt == AUTH){
-				Logger::warning("User found");
-				target_fd = it->second->fd;
-				// FIX: essa logica de mensagem tira todos os espacos. Preciso entender se a parada de `:` é o jeito
-				// certo de delimitar as mensagem sempre ou se preciso fazer um parsing mais minucioso.
-				std::string target_msg = user->nickname + "!" + user->username + " PRIVMSG " + target_nick + ":";
-				for (std::size_t i = 2; i < splited_buffer.size(); i++) { 
-					target_msg += splited_buffer[i];
-				}
-				target_msg += "\n";
-				send(target_fd, target_msg.c_str(), target_msg.size(), 0);
-				return;
-			}
-			Logger::warning("User NOT found");
-			std::string error_msg = "401 " + user->nickname + " " + target_nick + " :No such nick/channel\n";
-			Logger::warning("send");
-			send(user->fd, error_msg.c_str(), error_msg.size(), 0);
-			Logger::warning("after");
+	const std::string str_msg = std::string(buffer);
+	Message msg(str_msg);
+	if (msg.command == "PRIVMSG"){
+		User *target_usr = this->get_user_by_nickname(msg.params[0]);
+		if (!target_usr){
+			std::string error_msg = "user with nickname " + msg.params[0] + " not found";
+			this->send_message(user->fd, error_msg);
 			return;
 		}
-	}
-	std::string msg = "Command not supported | internal server error: " + std::string(buffer) + "\n";
-	send(user->fd, msg.c_str(), msg.size(), 0);
-	return;
+		user->send_message_to_user(target_usr, msg.params[1]);
+		return;
+	} 
+	this->send_message(user->fd, "command not implemented");
 }
 
 void Server::run(){
@@ -259,11 +240,9 @@ void Server::run(){
 						this->poll_fds.erase(this->poll_fds.begin() + i);
 						--i;
 					} else {
-						Logger::warning("Got in else");
 						buffer[bytes_recv] = '\0';
 						User *current_user = this->fd_users.at(current_pollfd.fd);
-						Logger::warning("user state: " + numToString(current_user->stt));
-						if (current_user->stt == AUTH){
+						if (current_user->is_registered){
 							this->proccess_message(buffer, current_user);
 						} else {
 							authenticate_user(buffer, current_user);

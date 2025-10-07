@@ -2,12 +2,6 @@
 #define USER_CPP
 #include <string>
 
-enum state{
-	PASS,
-	NICK,
-	USER,
-	AUTH
-};
 class User {
 private:
 protected:
@@ -19,10 +13,13 @@ public:
 	std::string nickname;
 	std::string username;
 	std::string realname;
+	std::string prefix;
+	bool is_registered;
+	bool is_authenticated;
 	int fd;
 	bool is_in_channel;
 	std::string channel;
 	int random_n;
-	state stt;
+	void send_message_to_user(User *target_usr, std::string message);
 };
 #endif
