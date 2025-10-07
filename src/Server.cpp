@@ -32,16 +32,18 @@
 #include <utility>
 #include <vector>
 // TODO: 
-// - resolver os FIX que anotei
+// # Geral
+// - resolver os FIX/TODO que anotei pela codebase
 // - colocar todas as classes em forma ortodoxa canonica
+// - subject menciona que temos que lidar com mensgens tipo "com^Dman^Dd".  "In order to process a command, you have to first aggregate the received packets in order to rebuild it." não entendi qual o problema do servider de receber uma mensagem assim, mas blz
+// # Channels
 // - classes de channels
 // - comandos de channels
 // - broadcast de mensagens em channels
+// # Operators
 // - classes de operators
 // - comandos de operators
-// - subject menciona que temos que lidar com mensgens tipo "com^Dman^Dd".
-//        - "In order to process a command, you have to first aggregate the received packets in order to rebuild it."
-//        - não entendi qual o problema de uma mensagem assim, mas blz
+
 
 Server::Server(std::string port, std::string password): password(password), port_str(port){
 	this->port = std::atoi(port.c_str());
@@ -146,7 +148,7 @@ void Server::authenticate_user(char *buffer, User *user){
 		std::string msg = "User registered.";
 		this->send_message(user->fd, msg);
 		this->nick_users[user->nickname] = user;
-		user->prefix = user->nickname + "!" + user->username + "@" + "<hostname>";
+		user->prefix = user->nickname + "!" + user->username + "@" + "<hostname>"; //TODO: substituir pelo ip/hostname do usuário
 		user->is_registered = true;
 		return;
 	}
@@ -204,7 +206,7 @@ void Server::run(){
 		}
 		for (std::size_t i = 0; i < this->poll_fds.size(); i++){
 			pollfd current_pollfd = this->poll_fds[i];
-			if (current_pollfd.revents & POLLIN) {
+			if (current_pollfd.revents & POLLIN) { // TODO: tem um tal de POLLHUP tambem que temos que
 				if (current_pollfd.fd == this->sock){
 					int client_pollfd= this->accept_connection();
 					if (client_pollfd < 0){
